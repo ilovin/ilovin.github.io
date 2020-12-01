@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 5.2.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"ilovin.me","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="最近在做OCR相关的东西，关于OCR真的是有悠久了历史了，最开始用tesseract然而效果总是不理想，其中字符分割真的是个博大精深的问题，那么多年那么多算法，然而应用到实际总是有诸多问题。比如说非等间距字体的分割，汉字的分割，有光照阴影的图片的字体分割等等，针对特定的问题，特定的算法能有不错的效果，但也仅限于特定问题，很难有一些通用的结果。于是看了Xlvector的博客之后，发现可以端到端来实现">
+<meta property="og:type" content="article">
+<meta property="og:title" content="tensorflow LSTM + CTC实现端到端OCR">
+<meta property="og:url" content="http://ilovin.me/2017-04-06/tensorflow-lstm-ctc-ocr/index.html">
+<meta property="og:site_name" content="Scott&#39;s Notes">
+<meta property="og:description" content="最近在做OCR相关的东西，关于OCR真的是有悠久了历史了，最开始用tesseract然而效果总是不理想，其中字符分割真的是个博大精深的问题，那么多年那么多算法，然而应用到实际总是有诸多问题。比如说非等间距字体的分割，汉字的分割，有光照阴影的图片的字体分割等等，针对特定的问题，特定的算法能有不错的效果，但也仅限于特定问题，很难有一些通用的结果。于是看了Xlvector的博客之后，发现可以端到端来实现">
+<meta property="og:locale">
+<meta property="og:image" content="http://omy9d4djr.bkt.clouddn.com/markdown-img-paste-20170407164955997.png">
+<meta property="og:image" content="http://omy9d4djr.bkt.clouddn.com/markdown-img-paste-20170407163813851.png">
+<meta property="og:image" content="http://omy9d4djr.bkt.clouddn.com/markdown-img-paste-20170407164731411.png">
+<meta property="article:published_time" content="2017-04-06T12:40:42.000Z">
+<meta property="article:modified_time" content="2017-09-17T13:55:38.000Z">
+<meta property="article:author" content="Scott">
+<meta property="article:tag" content="ctc">
+<meta property="article:tag" content="lstm">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http://omy9d4djr.bkt.clouddn.com/markdown-img-paste-20170407164955997.png">
+
+<link rel="canonical" href="http://ilovin.me/2017-04-06/tensorflow-lstm-ctc-ocr/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-Hans'
+  };
+</script>
+
+  <title>tensorflow LSTM + CTC实现端到端OCR | Scott's Notes</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="Toggle navigation bar">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">Scott's Notes</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>Home</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>Archives</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-Hans">
+    <link itemprop="mainEntityOfPage" href="http://ilovin.me/2017-04-06/tensorflow-lstm-ctc-ocr/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="Scott">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Scott's Notes">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          tensorflow LSTM + CTC实现端到端OCR
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">Posted on</span>
+
+              <time title="Created: 2017-04-06 20:40:42" itemprop="dateCreated datePublished" datetime="2017-04-06T20:40:42+08:00">2017-04-06</time>
+            </span>
+              <span class="post-meta-item">
+                <span class="post-meta-item-icon">
+                  <i class="far fa-calendar-check"></i>
+                </span>
+                <span class="post-meta-item-text">Edited on</span>
+                <time title="Modified: 2017-09-17 21:55:38" itemprop="dateModified" datetime="2017-09-17T21:55:38+08:00">2017-09-17</time>
+              </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">In</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%8A%80%E6%9C%AF%E6%9D%82%E8%B0%88/" itemprop="url" rel="index"><span itemprop="name">技术杂谈</span></a>
+                </span>
+                  , 
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%8A%80%E6%9C%AF%E6%9D%82%E8%B0%88/%E6%B7%B1%E5%BA%A6%E5%AD%A6%E4%B9%A0/" itemprop="url" rel="index"><span itemprop="name">深度学习</span></a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>最近在做OCR相关的东西，关于OCR真的是有悠久了历史了，最开始用<a target="_blank" rel="noopener" href="https://github.com/tesseract-ocr/tesseract">tesseract</a>然而效果总是不理想，其中字符分割真的是个博大精深的问题，那么多年那么多算法，然而应用到实际总是有诸多问题。比如说非等间距字体的分割，汉字的分割，有光照阴影的图片的字体分割等等，针对特定的问题，特定的算法能有不错的效果，但也仅限于特定问题，很难有一些通用的结果。于是看了Xlvector的博客之后，发现可以端到端来实现OCR，他是基于mxnet的，于是我想把它转到tensorflow这个框架来，顺便还能熟悉一下这个框架。本文主要介绍实现思路，更加细节的实现方法见<a href="../../2017-04-23/tensorflow-lstm-ctc-input-output/">另一篇</a>。</p>
+<h2 id="正文"><a href="#正文" class="headerlink" title="正文"></a>正文</h2><h3 id="生成数据"><a href="#生成数据" class="headerlink" title="生成数据"></a>生成数据</h3><p>利用<a target="_blank" rel="noopener" href="https://pypi.python.org/pypi/captcha">captcha</a>来生成验证码，具体生成验证码的代码<a target="_blank" rel="noopener" href="https://github.com/ilovin/lstm_ctc_ocr/blob/master/genImg.py">请见这里</a>，共生成<code>4-6</code>位包含数字和英文大小写的训练图片128000张和测试图片400张。命名规则就是<code>num_label.png</code>，生成的图片如下图<br><img src="http://omy9d4djr.bkt.clouddn.com/markdown-img-paste-20170407164955997.png"></p>
+<a id="more"></a>
+<p>关于生成数据，再多说一点，可以像Xlvector那样一边生成一边训练，这样样本是无穷的，效果更好。但是实际应用中有限样本的情况还是更多的。</p>
+<h3 id="载入数据"><a href="#载入数据" class="headerlink" title="载入数据"></a>载入数据</h3><p>三种载入数据方式</p>
+<h4 id="在线生成"><a href="#在线生成" class="headerlink" title="在线生成"></a>在线生成</h4><p>调用keras的GeneratorEnqueuer，多线程在线生成，用了旷视的代码。<br>详细代码见<a target="_blank" rel="noopener" href="https://github.com/ilovin/lstm_ctc_ocr/blob/beta/lib/lstm/utils/gen.py">Github: gen.py</a></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">get_batch</span>(<span class="params">num_workers, **kwargs</span>):</span></span><br><span class="line">    <span class="keyword">try</span>:</span><br><span class="line">        enqueuer = GeneratorEnqueuer(generator(**kwargs), use_multiprocessing=<span class="literal">True</span>)</span><br><span class="line">        enqueuer.start(max_queue_size=<span class="number">24</span>, workers=num_workers)</span><br><span class="line">        generator_output = <span class="literal">None</span></span><br><span class="line">        <span class="keyword">while</span> <span class="literal">True</span>:</span><br><span class="line">            <span class="keyword">while</span> enqueuer.is_running():</span><br><span class="line">                <span class="keyword">if</span> <span class="keyword">not</span> enqueuer.queue.empty():</span><br><span class="line">                    generator_output = enqueuer.queue.get()</span><br><span class="line">                    <span class="keyword">break</span></span><br><span class="line">                <span class="keyword">else</span>:</span><br><span class="line">                    time.sleep(<span class="number">0.01</span>)</span><br><span class="line">            <span class="keyword">yield</span> generator_output</span><br><span class="line">            generator_output = <span class="literal">None</span></span><br><span class="line">    <span class="keyword">finally</span>:</span><br><span class="line">        <span class="keyword">if</span> enqueuer <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span>:</span><br><span class="line">            enqueuer.stop()</span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">&#x27;__main__&#x27;</span>:</span><br><span class="line">    <span class="comment"># gen = generator(batch_size=32, vis=False)</span></span><br><span class="line">    gen = get_batch(num_workers=<span class="number">24</span>,batch_size=<span class="number">32</span>,vis=<span class="literal">False</span>)</span><br><span class="line">    <span class="keyword">while</span> <span class="literal">True</span>:</span><br><span class="line">        images, labels,label_len,time_step =  <span class="built_in">next</span>(gen)</span><br><span class="line">        print(<span class="built_in">len</span>(images),<span class="string">&quot; &quot;</span>,images[<span class="number">0</span>].shape)</span><br></pre></td></tr></table></figure>
+<h4 id="pipeline"><a href="#pipeline" class="headerlink" title="pipeline"></a>pipeline</h4><p>最开始想通过一个<code>tf.train.string_input_producer</code>来读入所有的文件名，然后以pipline的方式读入，但是由于标签的是不定长的，想通过正则来生成label，一开始是想用<code>py_func</code>来实现，后来发现传入string会有问题，所以最后还是选择生成tf.record文件，关于不定长问题，把比较短的标签在后面补零（0是<code>blank</code>的便签，就是说自己的类别中不能出现0这个类），然后读出每个batch后，再把0去掉。</p>
+<h4 id="一次性载入"><a href="#一次性载入" class="headerlink" title="一次性载入"></a>一次性载入</h4><p>我这里给一个目录，然后遍历里面所有的文件，等到训练的时候，每一个epoch循环把文件的index给手动shuffle一下，然后就可以每次截取出一个batch来用作输入了</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">DataIterator</span>:</span></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__init__</span>(<span class="params">self, data_dir</span>):</span></span><br><span class="line">        self.image_names = []</span><br><span class="line">        self.image = []</span><br><span class="line">        self.labels=[]</span><br><span class="line">        <span class="keyword">for</span> root, sub_folder, file_list <span class="keyword">in</span> os.walk(data_dir):</span><br><span class="line">            <span class="keyword">for</span> file_path <span class="keyword">in</span> file_list:</span><br><span class="line">                image_name = os.path.join(root,file_path)</span><br><span class="line">                self.image_names.append(image_name)</span><br><span class="line">                im = cv2.imread(image_name,<span class="number">0</span>).astype(np.float32)/<span class="number">255.</span></span><br><span class="line">                im = cv2.resize(im,(image_width,image_height))</span><br><span class="line">                <span class="comment"># transpose to (160*60) and the step shall be 160</span></span><br><span class="line">                <span class="comment"># in this way, each row is a feature vector</span></span><br><span class="line">                im = im.swapaxes(<span class="number">0</span>,<span class="number">1</span>)</span><br><span class="line">                self.image.append(np.array(im))</span><br><span class="line">                <span class="comment">#image is named as ./&lt;folder&gt;/00000_abcd.png</span></span><br><span class="line">                code = image_name.split(<span class="string">&#x27;/&#x27;</span>)[<span class="number">2</span>].split(<span class="string">&#x27;_&#x27;</span>)[<span class="number">1</span>].split(<span class="string">&#x27;.&#x27;</span>)[<span class="number">0</span>]</span><br><span class="line">                code = [SPACE_INDEX <span class="keyword">if</span> code == SPACE_TOKEN <span class="keyword">else</span> maps[c] <span class="keyword">for</span> c <span class="keyword">in</span> <span class="built_in">list</span>(code)]</span><br><span class="line">                self.labels.append(code)</span><br><span class="line">                print(image_name,<span class="string">&#x27; &#x27;</span>,code)</span><br><span class="line"><span class="meta">    @property</span></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">size</span>(<span class="params">self</span>):</span></span><br><span class="line">        <span class="keyword">return</span> <span class="built_in">len</span>(self.labels)</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">input_index_generate_batch</span>(<span class="params">self,index=<span class="literal">None</span></span>):</span></span><br><span class="line">        <span class="keyword">if</span> index:</span><br><span class="line">            image_batch=[self.image[i] <span class="keyword">for</span> i <span class="keyword">in</span> index]</span><br><span class="line">            label_batch=[self.labels[i] <span class="keyword">for</span> i <span class="keyword">in</span> index]</span><br><span class="line">        <span class="keyword">else</span>:</span><br><span class="line">            <span class="comment"># get the whole data as input</span></span><br><span class="line">            image_batch=self.image</span><br><span class="line">            label_batch=self.labels</span><br><span class="line"></span><br><span class="line">        <span class="function"><span class="keyword">def</span> <span class="title">get_input_lens</span>(<span class="params">sequences</span>):</span></span><br><span class="line">            lengths = np.asarray([<span class="built_in">len</span>(s) <span class="keyword">for</span> s <span class="keyword">in</span> sequences], dtype=np.int64)</span><br><span class="line">            <span class="keyword">return</span> sequences,lengths</span><br><span class="line">        batch_inputs,batch_seq_len = get_input_lens(np.array(image_batch))</span><br><span class="line">        batch_labels = sparse_tuple_from_label(label_batch)</span><br><span class="line">        <span class="keyword">return</span> batch_inputs,batch_seq_len,batch_labels</span><br></pre></td></tr></table></figure>
+<p>需要注意的是tensorflow lstm输入格式的问题，其label tensor应该是稀疏矩阵，所以读取图片和label之后，还要进行一些处理，具体可以看<a target="_blank" rel="noopener" href="https://github.com/ilovin/lstm_ctc_ocr/blob/master/utils.py">代码</a><br>关于载入图片，发现12.8w张图一次读进内存，内存也就涨了5G，如果训练数据加大，还是加一个pipeline来读比较好。  </p>
+<h3 id="网络结构"><a href="#网络结构" class="headerlink" title="网络结构"></a>网络结构</h3><p>然后是网络结构</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><span class="line">graph = tf.Graph()</span><br><span class="line"><span class="keyword">with</span> graph.as_default():</span><br><span class="line">    inputs = tf.placeholder(tf.float32, [<span class="literal">None</span>, <span class="literal">None</span>, num_features])</span><br><span class="line">    labels = tf.sparse_placeholder(tf.int32)</span><br><span class="line">    seq_len = tf.placeholder(tf.int32, [<span class="literal">None</span>])</span><br><span class="line">    <span class="comment"># Stacking rnn cells</span></span><br><span class="line">    stack = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.LSTMCell(FLAGS.num_hidden,state_is_tuple=<span class="literal">True</span>) <span class="keyword">for</span> i <span class="keyword">in</span> <span class="built_in">range</span>(FLAGS.num_layers)] , state_is_tuple=<span class="literal">True</span>)</span><br><span class="line">    <span class="comment"># The second output is the last state and we will no use that</span></span><br><span class="line">    outputs, _ = tf.nn.dynamic_rnn(stack, inputs, seq_len, dtype=tf.float32)</span><br><span class="line">    shape = tf.shape(inputs)</span><br><span class="line">    batch_s, max_timesteps = shape[<span class="number">0</span>], shape[<span class="number">1</span>]</span><br><span class="line">    <span class="comment"># Reshaping to apply the same weights over the timesteps</span></span><br><span class="line">    outputs = tf.reshape(outputs, [-<span class="number">1</span>, FLAGS.num_hidden])</span><br><span class="line">    <span class="comment"># Truncated normal with mean 0 and stdev=0.1</span></span><br><span class="line">    W = tf.Variable(tf.truncated_normal([FLAGS.num_hidden,</span><br><span class="line">                                         num_classes],</span><br><span class="line">                                        stddev=<span class="number">0.1</span>),name=<span class="string">&#x27;W&#x27;</span>)</span><br><span class="line">    b = tf.Variable(tf.constant(<span class="number">0.</span>, shape=[num_classes],name=<span class="string">&#x27;b&#x27;</span>))</span><br><span class="line">    <span class="comment"># Doing the affine projection</span></span><br><span class="line">    logits = tf.matmul(outputs, W) + b</span><br><span class="line">    <span class="comment"># Reshaping back to the original shape</span></span><br><span class="line">    logits = tf.reshape(logits, [batch_s, -<span class="number">1</span>, num_classes])</span><br><span class="line">    <span class="comment"># Time major</span></span><br><span class="line">    logits = tf.transpose(logits, (<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>))</span><br><span class="line">    global_step = tf.Variable(<span class="number">0</span>,trainable=<span class="literal">False</span>)</span><br><span class="line"></span><br><span class="line">    loss = tf.nn.ctc_loss(labels=labels,inputs=logits, sequence_length=seq_len)</span><br><span class="line">    cost = tf.reduce_mean(loss)</span><br><span class="line">    <span class="comment">#optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate,</span></span><br><span class="line">    <span class="comment">#        momentum=FLAGS.momentum).minimize(cost,global_step=global_step)</span></span><br><span class="line">    optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.initial_learning_rate,</span><br><span class="line">            beta1=FLAGS.beta1,beta2=FLAGS.beta2).minimize(loss,global_step=global_step)</span><br><span class="line">    <span class="comment"># Option 2: tf.contrib.ctc.ctc_beam_search_decoder</span></span><br><span class="line">    <span class="comment"># (it&#x27;s slower but you&#x27;ll get better results)</span></span><br><span class="line">    <span class="comment">#decoded, log_prob = tf.nn.ctc_greedy_decoder(logits, seq_len,merge_repeated=False)</span></span><br><span class="line">    decoded, log_prob = tf.nn.ctc_beam_search_decoder(logits, seq_len,merge_repeated=<span class="literal">False</span>)</span><br><span class="line">    <span class="comment"># Inaccuracy: label error rate</span></span><br><span class="line">    lerr = tf.reduce_mean(tf.edit_distance(tf.cast(decoded[<span class="number">0</span>], tf.int32), labels))</span><br></pre></td></tr></table></figure>
+<p>这里我参考了<a target="_blank" rel="noopener" href="http://stackoverflow.com/questions/38059247/using-tensorflows-connectionist-temporal-classification-ctc-implementation">stackoverflow</a>的一篇帖子写的，根据tensorflow 1.0.1的版本做了微调，使用了Adam作为optimizer。<br>需要注意的是ctc_beam_search_decoder是非常耗时的，见下图<br><img src="http://omy9d4djr.bkt.clouddn.com/markdown-img-paste-20170407163813851.png" alt="ctc_beam_search_decoder"><br>和greedy_decoder的区别是，greedy_decoder根据当前序列预测下一个字符，并且取概率最高的作为结果，再此基础上再进行下一次预测。而beam_search_decoder每次会保存取k个概率最高的结果，以此为基础再进行预测，并将下一个字符出现的概率与当前k个出现的概率相乘，这样就可以减缓贪心造成的丢失好解的情况，当k=1的时候，二者就一样了。</p>
+<h3 id="结果"><a href="#结果" class="headerlink" title="结果"></a>结果</h3><p>—update—<br>在线生成毫无疑问因为样本量无穷，正确率最高，2w步时准确率超96%，继续训练，超98%.</p>
+<p>把网络用在识别身份证号，试了73张网上爬的（不同分辨率下的）真实图片，错了一张，准确率在98%左右（不过毕竟身份证号比较简单）</p>
+<p>大概14个epoch后，准确率过了50%，现在跑到了73%的正确率。<br><img src="http://omy9d4djr.bkt.clouddn.com/markdown-img-paste-20170407164731411.png" alt="accuracy"><br>最后，代码托管在<a target="_blank" rel="noopener" href="http://github.com/ilovin/lstm_ctc_ocr">Github</a>上。</p>
+<h2 id="后记"><a href="#后记" class="headerlink" title="后记"></a>后记</h2><p>百度出了一个warpCTC可以加速CTC的计算，试用了一下CPU的版本发现好像没什么速度的提升，不知道是不是姿势不对，回头再试试GPU的版本。<br>对于更加细节的实现方法（输入输出的构造，以及warpCTC和内置ctc_loss的异同）放在了<a href="../../2017-04-23/tensorflow-lstm-ctc-input-output/">另一篇博客</a>。</p>
+<ul>
+<li>warpCTC的GPU版本试过之后发现速度差不多,但是能极大的减少CPU的占用</li>
+<li>对于不同的优化器，数据，同样的参数是不能普适的。往往之前的参数可以收敛，换个optimizer，数据，网络就不能收敛了。这个时候要微调参数。对于不同的优化器之间区别，文末有一篇神文可以参考</li>
+</ul>
+<p>如果有发现问题，请前辈们一定要不吝赐教，在下方留言指出，或者在github上提出issue</p>
+<h2 id="参考链接"><a href="#参考链接" class="headerlink" title="参考链接"></a>参考链接</h2><p><a target="_blank" rel="noopener" href="http://ruder.io/optimizing-gradient-descent/">不同Optimizer详解</a><br><a target="_blank" rel="noopener" href="http://blog.xlvector.net/2016-05/mxnet-ocr-cnn/">端到端的OCR：LSTM+CTC的实现</a><br><a target="_blank" rel="noopener" href="http://stackoverflow.com/questions/38059247/using-tensorflows-connectionist-temporal-classification-ctc-implementation">Using Tensorflow’s Connectionist Temporal Classification (CTC) implementation</a><br><a target="_blank" rel="noopener" href="http://www.jmlr.org/proceedings/papers/v32/graves14.pdf">ctc_beam_search:</a></p>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/ctc/" rel="tag"># ctc</a>
+              <a href="/tags/lstm/" rel="tag"># lstm</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2017-03-17/ccache-error/" rel="prev" title="/usr/bin/ccache invalid option -- 'E'的解决方法">
+      <i class="fa fa-chevron-left"></i> /usr/bin/ccache invalid option -- 'E'的解决方法
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2017-04-07/disqus-load-problem/" rel="next" title="Disqus无法在Github Pages上加载的解决方法">
+      Disqus无法在Github Pages上加载的解决方法 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          Table of Contents
+        </li>
+        <li class="sidebar-nav-overview">
+          Overview
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%AD%A3%E6%96%87"><span class="nav-number">1.</span> <span class="nav-text">正文</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%94%9F%E6%88%90%E6%95%B0%E6%8D%AE"><span class="nav-number">1.1.</span> <span class="nav-text">生成数据</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E8%BD%BD%E5%85%A5%E6%95%B0%E6%8D%AE"><span class="nav-number">1.2.</span> <span class="nav-text">载入数据</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%9C%A8%E7%BA%BF%E7%94%9F%E6%88%90"><span class="nav-number">1.2.1.</span> <span class="nav-text">在线生成</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#pipeline"><span class="nav-number">1.2.2.</span> <span class="nav-text">pipeline</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#%E4%B8%80%E6%AC%A1%E6%80%A7%E8%BD%BD%E5%85%A5"><span class="nav-number">1.2.3.</span> <span class="nav-text">一次性载入</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%BD%91%E7%BB%9C%E7%BB%93%E6%9E%84"><span class="nav-number">1.3.</span> <span class="nav-text">网络结构</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%BB%93%E6%9E%9C"><span class="nav-number">1.4.</span> <span class="nav-text">结果</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%90%8E%E8%AE%B0"><span class="nav-number">2.</span> <span class="nav-text">后记</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%8F%82%E8%80%83%E9%93%BE%E6%8E%A5"><span class="nav-number">3.</span> <span class="nav-text">参考链接</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">Scott</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">14</span>
+          <span class="site-state-item-name">posts</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+        <span class="site-state-item-count">8</span>
+        <span class="site-state-item-name">categories</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+        <span class="site-state-item-count">14</span>
+        <span class="site-state-item-name">tags</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">Scott</span>
+</div>
+  <div class="powered-by">Powered by <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://muse.theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Muse</a>
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/muse.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
